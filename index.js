@@ -1,5 +1,5 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const { sendButtons, sendInteractiveMessage } = require('baileys_helpers'); // ✅ THE FIX
+const { sendButtons, sendInteractiveMessage } = require('baileys_helper'); // ✅ THE FIX
 const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 
