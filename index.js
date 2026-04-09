@@ -17,12 +17,7 @@ const BUSINESS_TAGLINE = "🍔 Fresh burgers, pizzas & more — hot delivered to
 const BUSINESS_WEBSITE = "https://www.javagoat.com";
 const BUSINESS_PHONE   = "+911234567890";
 
-// ✅ FIX: Use a direct public image URL (no redirects, no auth)
-// ✅ Best free hosts: imgur.com, imgbb.com, postimages.org
-// ✅ Example imgbb direct link format:
-//    https://i.ibb.co/XXXXXXX/your-logo.jpg
-// ✅ Leave empty string "" to skip image entirely (no crash)
-const PROFILE_PHOTO_URL = ""; // 🔁 PUT YOUR IMAGE URL HERE or leave "" to skip
+const PROFILE_PHOTO_URL = ""; // Put direct image URL here, leave empty "" to skip
 
 const BUSINESS_ABOUT =
     `📖 *About ${BUSINESS_NAME}*\n\n` +
@@ -53,6 +48,7 @@ const BUSINESS_PROJECTS =
     `   🔗 You're using it right now!\n\n` +
     `📊 *Admin Dashboard*\n` +
     `   🔗 https://admin.javagoat.com`;
+
 // ============================================================
 
 const orderStates = {};
@@ -125,41 +121,32 @@ async function postToFirebase(url, data, retries = 3) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ✅ FIX: Safe Image Sender — NEVER crashes on 403/404
-// Tries image first → falls back to text only if image fails
+// ✅ Safe Image Sender — NEVER crashes on 403/404
 // ─────────────────────────────────────────────────────────────
 async function safeSendImage(sock, sender, imageUrl, caption) {
-    // If no URL provided, just send text directly
     if (!imageUrl || imageUrl.trim() === "") {
         await sock.sendMessage(sender, { text: caption });
         return;
     }
-
     try {
-        // ✅ First check if URL is reachable (HEAD request, no download)
         const check = await fetch(imageUrl, { method: 'HEAD' });
         if (!check.ok) {
-            // URL returned 403/404 etc — skip image, send text only
             console.warn(`⚠️ Image URL returned ${check.status}, sending text only`);
             await sock.sendMessage(sender, { text: caption });
             return;
         }
-
-        // URL is valid — send with image
         await sock.sendMessage(sender, {
             image:   { url: imageUrl },
             caption: caption
         });
-
     } catch (imgErr) {
-        // Any network error — skip image, send text only
         console.warn("⚠️ Image send failed, using text fallback:", imgErr.message);
         await sock.sendMessage(sender, { text: caption });
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🌟 Send Main Menu Poll
+// 🌟 Send Main Menu with Buttons
 // ─────────────────────────────────────────────────────────────
 async function sendMainMenu(sock, sender) {
     const welcomeText =
@@ -169,57 +156,50 @@ async function sendMainMenu(sock, sender) {
         `🌐 ${BUSINESS_WEBSITE}\n` +
         `📱 ${BUSINESS_PHONE}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `👇 *Tap an option in the poll below!*`;
+        `👇 *Tap a button below!*`;
 
-    // ✅ Safe image send — will fallback to text if image fails
     await safeSendImage(sock, sender, PROFILE_PHOTO_URL, welcomeText);
 
-    // ✅ Poll always sends regardless of image success/fail
+    const buttons = [
+        { buttonId: 'menu', buttonText: { displayText: '📋 View Menu' }, type: 1 },
+        { buttonId: 'about', buttonText: { displayText: '📖 About Us' }, type: 1 },
+        { buttonId: 'contact', buttonText: { displayText: '📬 Contact Info' }, type: 1 },
+        { buttonId: 'projects', buttonText: { displayText: '🚀 Our Projects' }, type: 1 },
+        { buttonId: 'howtoorder', buttonText: { displayText: '🛒 How to Order' }, type: 1 }
+    ];
+
     await sock.sendMessage(sender, {
-        poll: {
-            name:            `🍽️ What do you want to do?`,
-            values:          [
-                "📋 View Menu",
-                "📖 About Us",
-                "📬 Contact Info",
-                "🚀 Our Projects",
-                "🛒 How to Order"
-            ],
-            selectableCount: 1
-        }
+        text: "Choose an option below:",
+        buttons,
+        headerType: 1
     });
 }
 
 // ─────────────────────────────────────────────────────────────
-// 📋 Send Menu Poll
+// 📋 Send Menu with Buttons
 // ─────────────────────────────────────────────────────────────
-async function sendMenuPoll(sock, sender) {
+async function sendMenuButtons(sock, sender) {
     const menu = await getMenuFromApp();
 
     if (menu.length === 0) {
-        await sock.sendMessage(sender, {
-            text: "⏳ Menu is updating. Please check back in a few minutes!"
-        });
+        await sock.sendMessage(sender, { text: "⏳ Menu is updating. Please check back in a few minutes!" });
         return;
     }
 
-    let menuText = `🍔 *JAVAGOAT LIVE MENU* 🍕\n━━━━━━━━━━━━━━━━━━━━\n\n`;
-    menu.forEach((item, i) => {
-        menuText += `${i + 1}. 🔸 *${item.name}* — ₹${item.price}\n`;
-    });
-    menuText += `\n━━━━━━━━━━━━━━━━━━━━\n👇 *Tap a dish in the poll to order it!*`;
+    const menuText = menu.map((item, i) => `${i + 1}. 🔸 *${item.name}* — ₹${item.price}`).join('\n');
+    await sock.sendMessage(sender, { text: `🍔 *JAVAGOAT LIVE MENU* 🍕\n\n${menuText}` });
 
-    await sock.sendMessage(sender, { text: menuText });
-
-    // Max 12 options in WhatsApp poll
-    const pollOptions = menu.slice(0, 12).map(item => `${item.name} — ₹${item.price}`);
+    // Buttons for first 10 menu items (max buttons allowed)
+    const buttons = menu.slice(0, 10).map(item => ({
+        buttonId: `order_${item.name.replace(/\s+/g, '_')}`,
+        buttonText: { displayText: `${item.name} — ₹${item.price}` },
+        type: 1
+    }));
 
     await sock.sendMessage(sender, {
-        poll: {
-            name:            "🛒 Which dish do you want to order?",
-            values:          pollOptions,
-            selectableCount: 1
-        }
+        text: "Select a dish to order:",
+        buttons,
+        headerType: 1
     });
 }
 
@@ -237,22 +217,20 @@ async function startBot() {
 
     const sock = makeWASocket({
         version,
-        auth:              state,
+        auth: state,
         printQRInTerminal: false,
-        logger:            pino({ level: 'silent' }),
-        browser:           ["S", "K", "1"]
+        logger: pino({ level: 'silent' }),
+        browser: ["S", "K", "1"]
     });
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
             console.clear();
-            console.log('\n==================================================');
-            console.log('⚠️ QR TOO BIG? CLICK "View raw logs" top right!');
-            console.log('==================================================\n');
+            console.log('Scan QR to login:');
             qrcode.generate(qr, { small: true });
         }
-        if (connection === 'open')  console.log('✅ JAVAGOAT AI IS ONLINE!');
+        if (connection === 'open') console.log('✅ JAVAGOAT AI IS ONLINE!');
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) startBot();
@@ -261,100 +239,65 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ────────────────────────────────────────────────────────
-    // 📨 Message Handler
-    // ────────────────────────────────────────────────────────
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg?.message)                                    return;
-            if (msg.key.remoteJid === 'status@broadcast')         return;
-            if (msg.key.fromMe)                                   return;
+            if (!msg?.message || msg.key.remoteJid === 'status@broadcast' || msg.key.fromMe) return;
 
             const sender = msg.key.remoteJid;
-            if (isRateLimited(sender))                            return;
+            if (isRateLimited(sender)) return;
 
-            // ── Read poll vote ──────────────────────────────
-            const pollVote = msg.message?.pollUpdateMessage;
-
-            // ── Read text ───────────────────────────────────
             const text = (
-                msg.message.conversation              ||
+                msg.message.conversation ||
                 msg.message.extendedTextMessage?.text ||
                 ""
             ).toLowerCase().trim();
 
-            console.log(`📩 From ${sender.split('@')[0]}: "${text || '[poll]'}"`);
+            console.log(`📩 From ${sender.split('@')[0]}: "${text || '[button]'}"`);
 
-            // ════════════════════════════════════════════════
-            // 🗳️ POLL VOTE HANDLER
-            // ════════════════════════════════════════════════
-            if (pollVote) {
-                const selectedOption = pollVote.vote?.selectedOptions?.[0]?.optionName || "";
-                const v              = selectedOption.toLowerCase();
-                console.log(`🗳️ Poll vote: "${selectedOption}"`);
+            // ── BUTTON HANDLER ─────────────────────────────
+            const buttonReply = msg.message?.buttonsResponseMessage?.selectedButtonId;
 
-                if (v.includes("view menu") || v.includes("menu")) {
-                    await sendMenuPoll(sock, sender);
-                    return;
-                }
-                if (v.includes("about")) {
-                    await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
-                    await sock.sendMessage(sender, { text: `💡 Say *hi* to return to main menu!` });
-                    return;
-                }
-                if (v.includes("contact")) {
-                    await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
-                    return;
-                }
-                if (v.includes("projects")) {
-                    await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
-                    return;
-                }
-                if (v.includes("how to order")) {
-                    await sock.sendMessage(sender, {
+            if (buttonReply) {
+                if (buttonReply === 'menu') return await sendMenuButtons(sock, sender);
+                if (buttonReply === 'about') return await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
+                if (buttonReply === 'contact') return await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
+                if (buttonReply === 'projects') return await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
+                if (buttonReply === 'howtoorder') {
+                    return await sock.sendMessage(sender, {
                         text:
                             `🛒 *How to Order:*\n\n` +
-                            `1️⃣ Type *menu* → tap a dish in the poll\n` +
+                            `1️⃣ Type *menu* → tap a dish button\n` +
                             `2️⃣ Send your *Name + Address*\n` +
                             `3️⃣ Order confirmed! 🎉\n\n` +
                             `Or directly type: *order pizza*`
                     });
-                    return;
                 }
 
-                // ── Menu poll — user tapped a dish ──────────
-                const menu        = await getMenuFromApp();
-                const matchedItem = menu.find(item =>
-                    selectedOption.toLowerCase().includes(item.name.toLowerCase())
-                );
+                // Dish order buttons
+                if (buttonReply.startsWith('order_')) {
+                    const productRequested = buttonReply.replace('order_', '').replace(/_/g, ' ').toLowerCase();
+                    const menu = await getMenuFromApp();
+                    const matchedItem = menu.find(i => i.name.toLowerCase() === productRequested);
 
-                if (matchedItem) {
+                    if (!matchedItem) return await sock.sendMessage(sender, { text: `❌ Dish not found.` });
+
                     orderStates[sender] = { step: 'WAITING_FOR_ADDRESS', item: matchedItem };
 
-                    const orderText =
+                    const captionText =
                         `🛒 *Order Started!*\n\n` +
                         `You selected: *${matchedItem.name}* (₹${matchedItem.price})\n` +
                         `🚚 *Delivery Fee:* ₹50\n` +
                         `💰 *Total:* ₹${parseFloat(matchedItem.price) + 50}\n\n` +
                         `📍 Please reply with:\n*Full Name, Phone & Delivery Address*`;
 
-                    // ✅ Safe image send for dish image too
-                    await safeSendImage(sock, sender, matchedItem.imageUrl, orderText);
-                    return;
+                    return await safeSendImage(sock, sender, matchedItem.imageUrl, captionText);
                 }
-
-                await sock.sendMessage(sender, {
-                    text: `🤔 Couldn't process that. Say *hi* to see the main menu!`
-                });
-                return;
             }
 
-            // ════════════════════════════════════════════════
-            // 🛒 ORDER STEP 2 — Address received
-            // ════════════════════════════════════════════════
+            // ── ORDER STEP 2 — Address received
             if (orderStates[sender]?.step === 'WAITING_FOR_ADDRESS') {
-                const item             = orderStates[sender].item;
+                const item = orderStates[sender].item;
                 const customerWaNumber = sender.split('@')[0];
 
                 const javaGoatOrder = {
@@ -363,16 +306,10 @@ async function startBot() {
                     phone:     customerWaNumber,
                     address:   text,
                     location:  { lat: 0, lng: 0 },
-                    items: [{
-                        id:       item.id,
-                        name:     item.name,
-                        price:    parseFloat(item.price),
-                        img:      item.imageUrl || "",
-                        quantity: 1
-                    }],
-                    total:     (parseFloat(item.price) + 50).toFixed(2),
-                    status:    "Placed",
-                    method:    "Cash on Delivery (WhatsApp)",
+                    items: [{ id: item.id, name: item.name, price: parseFloat(item.price), img: item.imageUrl || "", quantity: 1 }],
+                    total: (parseFloat(item.price) + 50).toFixed(2),
+                    status: "Placed",
+                    method: "Cash on Delivery (WhatsApp)",
                     timestamp: new Date().toISOString()
                 };
 
@@ -392,49 +329,20 @@ async function startBot() {
                 return;
             }
 
-            // ════════════════════════════════════════════════
-            // 📝 TEXT KEYWORD HANDLERS
-            // ════════════════════════════════════════════════
-
-            if (["hi","hello","hey","start","hii","helo"].some(g => text.includes(g))) {
-                await sendMainMenu(sock, sender);
-                return;
-            }
-
-            if (text === "menu" || text.includes("food") || text.includes("price") || text.includes("list")) {
-                await sendMenuPoll(sock, sender);
-                return;
-            }
-
-            if (["about","about me","aboutme"].includes(text)) {
-                await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
-                return;
-            }
-
-            if (["contact","contactme","call us"].includes(text) || text.includes("call")) {
-                await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
-                return;
-            }
-
-            if (["projects","project","portfolio"].includes(text)) {
-                await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
-                return;
-            }
+            // ── TEXT HANDLERS
+            if (["hi","hello","hey","start"].some(g => text.includes(g))) return await sendMainMenu(sock, sender);
+            if (text === "menu") return await sendMenuButtons(sock, sender);
+            if (["about"].includes(text)) return await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
+            if (["contact"].includes(text)) return await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
+            if (["projects"].includes(text)) return await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
 
             if (text.startsWith("order ")) {
-                const productRequested = text.replace("order ", "").trim();
-                const menu             = await getMenuFromApp();
-                const matchedItem      = menu.find(i => i.name.toLowerCase().includes(productRequested));
-
-                if (!matchedItem) {
-                    await sock.sendMessage(sender, {
-                        text: `❌ *${productRequested}* not found.\n\nType *menu* to see all dishes!`
-                    });
-                    return;
-                }
+                const productRequested = text.replace("order ", "").trim().toLowerCase();
+                const menu = await getMenuFromApp();
+                const matchedItem = menu.find(i => i.name.toLowerCase() === productRequested);
+                if (!matchedItem) return await sock.sendMessage(sender, { text: `❌ Dish not found.` });
 
                 orderStates[sender] = { step: 'WAITING_FOR_ADDRESS', item: matchedItem };
-
                 const captionText =
                     `🛒 *Order Started!*\n\n` +
                     `You selected: *${matchedItem.name}* (₹${matchedItem.price})\n` +
@@ -442,37 +350,24 @@ async function startBot() {
                     `💰 *Total:* ₹${parseFloat(matchedItem.price) + 50}\n\n` +
                     `📍 Please reply with:\n*Full Name, Phone & Delivery Address*`;
 
-                await safeSendImage(sock, sender, matchedItem.imageUrl, captionText);
-                return;
-            }
-
-            if (text === "order") {
-                await sock.sendMessage(sender, {
-                    text:
-                        `🛒 *How to Order:*\n\n` +
-                        `Type: *order [dish name]*\n\n` +
-                        `Example: *order pizza*\n\n` +
-                        `Or type *menu* to browse first! 📋`
-                });
-                return;
+                return await safeSendImage(sock, sender, matchedItem.imageUrl, captionText);
             }
 
             // 🤔 Fallback
             await sock.sendMessage(sender, {
                 text:
                     `🤔 I didn't understand that.\n\n` +
-                    `Here's what I can do:\n\n` +
-                    `👋 *hi*              → Main Menu\n` +
-                    `📋 *menu*            → Food Menu\n` +
-                    `📖 *about*           → About Us\n` +
-                    `📬 *contact*         → Contact Info\n` +
-                    `🚀 *projects*        → Our Projects\n` +
-                    `🛒 *order [food]*    → Place Order\n\n` +
+                    `👋 *hi* → Main Menu\n` +
+                    `📋 *menu* → Food Menu\n` +
+                    `📖 *about* → About Us\n` +
+                    `📬 *contact* → Contact Info\n` +
+                    `🚀 *projects* → Our Projects\n` +
+                    `🛒 *order [food]* → Place Order\n\n` +
                     `_Say *hi* to get started!_ 😊`
             });
 
         } catch (err) {
-            console.error("❌ Handler error (non-fatal):", err.message);
+            console.error("❌ Handler error:", err.message);
         }
     });
 }
