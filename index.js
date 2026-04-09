@@ -1,4 +1,5 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { sendButtons, sendInteractiveMessage } = require('baileys_helpers'); // ✅ THE FIX
 const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 
@@ -8,10 +9,15 @@ const FIREBASE_URL = process.env.FIREBASE_URL;
 // ============================================================
 // 🖼️ YOUR BUSINESS PROFILE INFO — EDIT THESE
 // ============================================================
-const PROFILE_PHOTO_URL = "https://your-image-url.com/javagoat-logo.jpg"; // 🔁 Your photo/logo URL
+const PROFILE_PHOTO_URL = "https://your-image-url.com/javagoat-logo.jpg";
 const BUSINESS_NAME     = "JavaGoat";
 const BUSINESS_TAGLINE  = "🍔 Fresh burgers, pizzas & more — hot delivered to your door!";
-const BUSINESS_ABOUT    = 
+const BUSINESS_PHONE    = "+911234567890";   // 🔁 Your phone number
+const BUSINESS_WEBSITE  = "https://www.javagoat.com"; // 🔁 Your website
+const BUSINESS_EMAIL    = "support@javagoat.com";
+// ============================================================
+
+const BUSINESS_ABOUT =
     `📖 *About ${BUSINESS_NAME}*\n\n` +
     `We are a modern cloud kitchen dedicated to serving the *freshest and tastiest* food in town.\n\n` +
     `🏆 *Why Choose Us?*\n` +
@@ -21,11 +27,11 @@ const BUSINESS_ABOUT    =
     `✅ Affordable prices\n\n` +
     `Started in 2023, we have served *10,000+ happy customers!* 🎉`;
 
-const BUSINESS_CONTACT  =
+const BUSINESS_CONTACT =
     `📞 *Contact ${BUSINESS_NAME}*\n\n` +
-    `📱 *Phone:*   +911234567890\n` +
-    `📧 *Email:*   support@javagoat.com\n` +
-    `🌐 *Website:* https://www.javagoat.com\n` +
+    `📱 *Phone:*   ${BUSINESS_PHONE}\n` +
+    `📧 *Email:*   ${BUSINESS_EMAIL}\n` +
+    `🌐 *Website:* ${BUSINESS_WEBSITE}\n` +
     `📍 *Address:* 123, Food Street, Mumbai, India\n\n` +
     `🕘 *Working Hours:* 9 AM – 10 PM (All Days)\n\n` +
     `💬 We reply within *10 minutes!*`;
@@ -37,7 +43,7 @@ const BUSINESS_PROJECTS =
     `   🔗 https://javagoat.com/app\n\n` +
     `🌐 *JavaGoat Website*\n` +
     `   Browse menu, track orders online\n` +
-    `   🔗 https://www.javagoat.com\n\n` +
+    `   🔗 ${BUSINESS_WEBSITE}\n\n` +
     `🤖 *WhatsApp AI Bot*\n` +
     `   Order food directly via WhatsApp\n` +
     `   🔗 You're using it right now!\n\n` +
@@ -45,10 +51,6 @@ const BUSINESS_PROJECTS =
     `   Live order management panel\n` +
     `   🔗 https://admin.javagoat.com\n\n` +
     `_More projects coming soon... 🔥_`;
-
-const BUSINESS_WEBSITE  = "https://www.javagoat.com";   // 🔁 Your website
-const BUSINESS_PHONE    = "+911234567890";              // 🔁 Your phone number
-// ============================================================
 
 const orderStates = {};
 
@@ -73,115 +75,96 @@ async function getMenuFromApp() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🚀 Helper: Send Profile Card with 5 Clickable Buttons
+// 🌟 Send Profile Card with REAL Clickable Buttons
+// Uses baileys_helpers — works on ALL WhatsApp versions
 // ─────────────────────────────────────────────────────────────
 async function sendProfileCard(sock, sender) {
-    const greetCaption =
+    const bodyText =
         `👋 *Welcome to ${BUSINESS_NAME}!*\n\n` +
         `${BUSINESS_TAGLINE}\n\n` +
-        `━━━━━━━��━━━━━━━━━━━━\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
         `🌐 ${BUSINESS_WEBSITE}\n` +
         `📱 ${BUSINESS_PHONE}\n` +
+        `📧 ${BUSINESS_EMAIL}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `👇 *Tap a button below to explore us!*`;
+        `👇 *Tap a button below to explore!*`;
 
     try {
-        // ✅ PRIMARY: Image + 5 Template Buttons
+        // ✅ STEP 1: Send Profile Photo first
         await sock.sendMessage(sender, {
             image: { url: PROFILE_PHOTO_URL },
-            caption: greetCaption,
-            footer: `${BUSINESS_NAME} • AI Assistant 🤖`,
-            templateButtons: [
+            caption: bodyText
+        });
+
+        // ✅ STEP 2: Send Interactive Buttons using baileys_helpers
+        // These are REAL WhatsApp native buttons — no 403 error!
+        await sendInteractiveMessage(sock, sender, {
+            text:   `What would you like to know about *${BUSINESS_NAME}*?`,
+            footer: `${BUSINESS_NAME} AI Assistant 🤖`,
+            interactiveButtons: [
+                // 📖 About Me — Quick Reply Button
                 {
-                    index: 1,
-                    callButton: {
-                        displayText: '📞 Call Us',
-                        phoneNumber: BUSINESS_PHONE          // ☎️ Opens dialer with number
-                    }
+                    name: 'quick_reply',
+                    buttonParamsJson: JSON.stringify({
+                        display_text: '📖 About Me',
+                        id: 'btn_about'
+                    })
                 },
+                // 📬 Contact Me — Quick Reply Button
                 {
-                    index: 2,
-                    urlButton: {
-                        displayText: '🌐 Visit Website',
-                        url: BUSINESS_WEBSITE                // 🌐 Opens website in browser
-                    }
+                    name: 'quick_reply',
+                    buttonParamsJson: JSON.stringify({
+                        display_text: '📬 Contact Me',
+                        id: 'btn_contact'
+                    })
                 },
+                // 🚀 Projects — Quick Reply Button
                 {
-                    index: 3,
-                    quickReplyButton: {
-                        displayText: '📖 About Me',
-                        id: 'btn_about'                      // Sends back btn_about as text
-                    }
+                    name: 'quick_reply',
+                    buttonParamsJson: JSON.stringify({
+                        display_text: '🚀 Projects',
+                        id: 'btn_projects'
+                    })
                 },
+                // 🌐 Website — URL Button (opens browser)
                 {
-                    index: 4,
-                    quickReplyButton: {
-                        displayText: '📬 Contact Me',
-                        id: 'btn_contact'                    // Sends back btn_contact as text
-                    }
+                    name: 'cta_url',
+                    buttonParamsJson: JSON.stringify({
+                        display_text: '🌐 Visit Website',
+                        url: BUSINESS_WEBSITE,
+                        merchant_url: BUSINESS_WEBSITE
+                    })
                 },
+                // 📞 Call — Phone Call Button (opens dialer)
                 {
-                    index: 5,
-                    quickReplyButton: {
-                        displayText: '🚀 Projects',
-                        id: 'btn_projects'                   // Sends back btn_projects as text
-                    }
+                    name: 'cta_call',
+                    buttonParamsJson: JSON.stringify({
+                        display_text: '📞 Call Us',
+                        phone_number: BUSINESS_PHONE
+                    })
                 }
             ]
         });
+
+        console.log("✅ Profile card with interactive buttons sent successfully!");
+
     } catch (err) {
         // ─────────────────────────────────────────────────────
-        // ⚠️ FALLBACK: If templateButtons fail, send List Menu
-        // (Works on all WhatsApp versions)
+        // ⚠️ FALLBACK: Plain text with keyword instructions
         // ─────────────────────────────────────────────────────
-        console.warn("⚠️ Template buttons failed, trying list message:", err.message);
-        try {
-            await sock.sendMessage(sender, {
-                image: { url: PROFILE_PHOTO_URL },
-                caption: greetCaption
-            });
-            await sock.sendMessage(sender, {
-                listMessage: {
-                    title:       `👋 Welcome to ${BUSINESS_NAME}!`,
-                    text:        `Explore us using the options below 👇`,
-                    footer:      `${BUSINESS_NAME} AI Assistant 🤖`,
-                    buttonText:  `📋 EXPLORE OPTIONS`,
-                    sections: [
-                        {
-                            title: "🌟 Quick Actions",
-                            rows: [
-                                { id: "btn_about",    title: "📖 About Me",     description: "Learn about JavaGoat" },
-                                { id: "btn_contact",  title: "📬 Contact Me",   description: "Phone, Email & Address" },
-                                { id: "btn_projects", title: "🚀 Our Projects", description: "Apps, Website & more" },
-                                { id: "btn_website",  title: "🌐 Website",      description: BUSINESS_WEBSITE },
-                                { id: "btn_call",     title: "📞 Call Us",      description: BUSINESS_PHONE }
-                            ]
-                        },
-                        {
-                            title: "🍔 Order Food",
-                            rows: [
-                                { id: "menu",  title: "📋 View Menu",    description: "See all available dishes" },
-                                { id: "order", title: "🛒 How to Order", description: "Type order [dish name]" }
-                            ]
-                        }
-                    ]
-                }
-            });
-        } catch (err2) {
-            // ─────────────────────────────────────────────────
-            // 🆘 FINAL FALLBACK: Plain text if everything fails
-            // ─────────────────────────────────────────────────
-            console.warn("⚠️ List message also failed, using plain text:", err2.message);
-            await sock.sendMessage(sender, {
-                text:
-                    greetCaption + "\n\n" +
-                    `📖 Type *about*    → About Us\n` +
-                    `📬 Type *contact*  → Contact Info\n` +
-                    `🚀 Type *projects* → Our Projects\n` +
-                    `📋 Type *menu*     → Food Menu\n` +
-                    `🛒 Type *order [food]* → Place Order`
-            });
-        }
+        console.warn("⚠️ Interactive buttons failed, using plain text fallback:", err.message);
+        await sock.sendMessage(sender, {
+            text:
+                bodyText + "\n\n" +
+                `*Reply with a keyword:*\n` +
+                `📖 Type *about*    → About Us\n` +
+                `📬 Type *contact*  → Contact Info\n` +
+                `🚀 Type *projects* → Our Projects\n` +
+                `🌐 Type *website*  → Website Link\n` +
+                `📞 Type *call*     → Phone Number\n` +
+                `📋 Type *menu*     → Food Menu\n` +
+                `🛒 Type *order [food]* → Place Order`
+        });
     }
 }
 
@@ -234,14 +217,22 @@ async function startBot() {
 
         const sender = msg.key.remoteJid;
 
-        // ✅ Capture ALL message types including button taps
+        // ✅ Capture ALL message types including interactive button taps
         const text = (
-            msg.message.conversation                                 ||
-            msg.message.extendedTextMessage?.text                   ||
-            msg.message.buttonsResponseMessage?.selectedButtonId    || // Button tap
-            msg.message.templateButtonReplyMessage?.selectedId      || // Template tap
-            msg.message.listResponseMessage?.singleSelectReply?.selectedRowId || // List tap
-            ""
+            msg.message.conversation                                               ||
+            msg.message.extendedTextMessage?.text                                 ||
+            msg.message.buttonsResponseMessage?.selectedButtonId                  || // Old buttons
+            msg.message.templateButtonReplyMessage?.selectedId                    || // Template
+            msg.message.listResponseMessage?.singleSelectReply?.selectedRowId     || // List
+            msg.message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson // ✅ NEW: Interactive buttons
+                ? (() => {
+                    try {
+                        return JSON.parse(
+                            msg.message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson || '{}'
+                        ).id || '';
+                    } catch { return ''; }
+                })()
+                : ""
         ).toLowerCase().trim();
 
         console.log(`📩 Message from ${sender.split('@')[0]}: "${text}"`);
@@ -250,8 +241,8 @@ async function startBot() {
         // 🛒 ORDER STEP 2: Waiting for Address
         // ════════════════════════════════════════════════════
         if (orderStates[sender]?.step === 'WAITING_FOR_ADDRESS') {
-            const customerDetails = text;
-            const item            = orderStates[sender].item;
+            const customerDetails  = text;
+            const item             = orderStates[sender].item;
             const customerWaNumber = sender.split('@')[0];
 
             const javaGoatOrder = {
@@ -297,40 +288,40 @@ async function startBot() {
         }
 
         // ════════════════════════════════════════════════════
-        // 🔘 BUTTON TAP / KEYWORD HANDLERS
+        // 🔘 BUTTON TAP + KEYWORD HANDLERS
         // ════════════════════════════════════════════════════
 
-        // ── 📖 About Me ─────────────────────────────────────
-        if (text === 'btn_about' || text === 'about' || text === 'about me' || text === 'aboutme') {
+        // ── 📖 About Me ──────────────────────────────────────
+        if (['btn_about', 'about', 'about me', 'aboutme'].includes(text)) {
             await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
             await sock.sendMessage(sender, {
-                text: `💡 Type *menu* to see our food, or *order [dish]* to order!\nOr say *hi* to see the full profile again. 😊`
+                text: `💡 Type *menu* to see our food, or say *hi* to see the profile again. 😊`
             });
             return;
         }
 
         // ── 📬 Contact Me ────────────────────────────────────
-        if (text === 'btn_contact' || text === 'contact' || text === 'contact me' || text === 'contactme' || text.includes("call")) {
+        if (['btn_contact', 'contact', 'contact me', 'contactme'].includes(text) || text.includes('contact')) {
             await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
             return;
         }
 
         // ── 🚀 Projects ──────────────────────────────────────
-        if (text === 'btn_projects' || text === 'projects' || text === 'project' || text === 'portfolio') {
+        if (['btn_projects', 'projects', 'project', 'portfolio'].includes(text)) {
             await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
             return;
         }
 
-        // ── 🌐 Website (List tap) ─────────────────────────────
-        if (text === 'btn_website' || text === 'website') {
+        // ── 🌐 Website ───────────────────────────────────────
+        if (['btn_website', 'website', 'web', 'site'].includes(text)) {
             await sock.sendMessage(sender, {
-                text: `🌐 *Visit Our Website*\n\n👉 ${BUSINESS_WEBSITE}\n\nBrowse our menu, track your orders, and more!`
+                text: `🌐 *Visit Our Website*\n\n👉 ${BUSINESS_WEBSITE}\n\nBrowse our menu, track your orders & more!`
             });
             return;
         }
 
-        // ── 📞 Call (List tap) ───────────────────────────────
-        if (text === 'btn_call') {
+        // ── 📞 Call ──────────────────────────────────────────
+        if (['btn_call', 'call', 'phone', 'number'].includes(text)) {
             await sock.sendMessage(sender, {
                 text: `📞 *Call Us Now!*\n\n👉 ${BUSINESS_PHONE}\n\n🕘 Available *9 AM – 10 PM* daily!`
             });
@@ -341,9 +332,11 @@ async function startBot() {
         // 🌟 ORDER STEP 1: Start Order Flow
         // ════════════════════════════════════════════════════
         if (text.startsWith("order ")) {
-            const productRequested = text.replace("order ", "").trim().toLowerCase();
-            const currentMenu = await getMenuFromApp();
-            const matchedItem = currentMenu.find(item => item.name.toLowerCase().includes(productRequested));
+            const productRequested = text.replace("order ", "").trim();
+            const currentMenu      = await getMenuFromApp();
+            const matchedItem      = currentMenu.find(item =>
+                item.name.toLowerCase().includes(productRequested)
+            );
 
             if (!matchedItem) {
                 await sock.sendMessage(sender, {
@@ -369,27 +362,31 @@ async function startBot() {
             } else {
                 await sock.sendMessage(sender, { text: captionText });
             }
+            return;
         }
 
-        else if (text === "order") {
+        if (text === "order") {
             await sock.sendMessage(sender, {
                 text: `🛒 *How to Order:*\n\nType *order* followed by the dish name.\n\n*Example:* order pizza\n*Example:* order burger\n\nOr type *menu* to see all dishes first! 📋`
             });
+            return;
         }
 
         // ════════════════════════════════════════════════════
         // 📋 Dynamic Live Menu
         // ════════════════════════════════════════════════════
-        else if (text === "menu" || text.includes("price") || text.includes("list") || text.includes("food")) {
+        if (["menu", "price", "list", "food"].some(k => text.includes(k))) {
             const currentMenu = await getMenuFromApp();
 
             if (currentMenu.length === 0) {
-                await sock.sendMessage(sender, { text: "⏳ Our menu is currently updating. Please check back in a few minutes!" });
+                await sock.sendMessage(sender, {
+                    text: "⏳ Our menu is currently updating. Please check back in a few minutes!"
+                });
                 return;
             }
 
-            let menuMessage = `🍔 *JAVAGOAT LIVE MENU* 🍕\n`;
-            menuMessage += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+            let menuMessage  = `🍔 *JAVAGOAT LIVE MENU* 🍕\n`;
+            menuMessage     += `━━━━━━━━━━━━━━━━━━━━\n\n`;
             currentMenu.forEach((item, index) => {
                 menuMessage += `${index + 1}. 🔸 *${item.name}*\n   💰 ₹${item.price}\n\n`;
             });
@@ -398,39 +395,34 @@ async function startBot() {
             menuMessage += `_Example: order pizza_`;
 
             await sock.sendMessage(sender, { text: menuMessage });
+            return;
         }
 
         // ════════════════════════════════════════════════════
-        // 👋 GREETING — Profile Card + 5 Clickable Buttons
+        // 👋 GREETING — Profile Photo + 5 Native Buttons
         // ════════════════════════════════════════════════════
-        else if (
-            text.includes("hi")    ||
-            text.includes("hello") ||
-            text.includes("hey")   ||
-            text.includes("start") ||
-            text === "hii"         ||
-            text === "helo"
-        ) {
-            await sendProfileCard(sock, sender); // 🌟 Sends photo + all 5 buttons
+        if (["hi", "hello", "hey", "start", "hii", "helo"].some(k => text.includes(k))) {
+            await sendProfileCard(sock, sender); // ✅ Sends photo + all 5 native buttons
+            return;
         }
 
         // ════════════════════════════════════════════════════
         // 🤔 Default Fallback
         // ════════════════════════════════════════════════════
-        else {
-            await sock.sendMessage(sender, {
-                text:
-                    `🤔 I didn't quite catch that.\n\n` +
-                    `Here's what I can do:\n\n` +
-                    `👋 *hi*              → Profile + Buttons\n` +
-                    `📖 *about*           → About JavaGoat\n` +
-                    `📬 *contact*         → Contact Info\n` +
-                    `🚀 *projects*        → Our Projects\n` +
-                    `📋 *menu*            → Food Menu\n` +
-                    `🛒 *order [food]*    → Place an Order\n\n` +
-                    `_Say *hi* to see our full profile!_ 😊`
-            });
-        }
+        await sock.sendMessage(sender, {
+            text:
+                `🤔 I didn't quite catch that.\n\n` +
+                `Here's what I can do:\n\n` +
+                `👋 *hi*              → Profile + Buttons\n` +
+                `📖 *about*           → About JavaGoat\n` +
+                `📬 *contact*         → Contact Info\n` +
+                `🚀 *projects*        → Our Projects\n` +
+                `🌐 *website*         → Website Link\n` +
+                `📞 *call*            → Phone Number\n` +
+                `📋 *menu*            → Food Menu\n` +
+                `🛒 *order [food]*    → Place an Order\n\n` +
+                `_Say *hi* to see our full profile!_ 😊`
+        });
     });
 }
 
