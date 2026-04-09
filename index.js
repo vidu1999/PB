@@ -10,12 +10,19 @@ const pino   = require('pino');
 const FIREBASE_URL = process.env.FIREBASE_URL;
 
 // ============================================================
-// 🖼️ BUSINESS INFO
+// 🖼️ BUSINESS INFO — EDIT THESE
 // ============================================================
 const BUSINESS_NAME    = "JavaGoat";
 const BUSINESS_TAGLINE = "🍔 Fresh burgers, pizzas & more — hot delivered to your door!";
 const BUSINESS_WEBSITE = "https://www.javagoat.com";
 const BUSINESS_PHONE   = "+911234567890";
+
+// ✅ FIX: Use a direct public image URL (no redirects, no auth)
+// ✅ Best free hosts: imgur.com, imgbb.com, postimages.org
+// ✅ Example imgbb direct link format:
+//    https://i.ibb.co/XXXXXXX/your-logo.jpg
+// ✅ Leave empty string "" to skip image entirely (no crash)
+const PROFILE_PHOTO_URL = ""; // 🔁 PUT YOUR IMAGE URL HERE or leave "" to skip
 
 const BUSINESS_ABOUT =
     `📖 *About ${BUSINESS_NAME}*\n\n` +
@@ -64,7 +71,7 @@ function isRateLimited(sender) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ✅ Menu Cache (prevents Firebase 429)
+// ✅ Menu Cache
 // ─────────────────────────────────────────────────────────────
 let menuCache     = [];
 let menuCacheTime = 0;
@@ -78,8 +85,11 @@ async function getMenuFromApp() {
         if (res.status === 429) { console.warn("⚠️ Firebase 429, using cache"); return menuCache; }
         const data = await res.json();
         if (!data) return [];
-        menuCache     = Object.keys(data).map(key => ({
-            id: key, name: data[key].name, price: data[key].price, imageUrl: data[key].imageUrl
+        menuCache = Object.keys(data).map(key => ({
+            id:       key,
+            name:     data[key].name,
+            price:    data[key].price,
+            imageUrl: data[key].imageUrl
         }));
         menuCacheTime = now;
         return menuCache;
@@ -96,9 +106,9 @@ async function postToFirebase(url, data, retries = 3) {
     for (let i = 1; i <= retries; i++) {
         try {
             const res = await fetch(url, {
-                method: 'POST',
+                method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+                body:    JSON.stringify(data)
             });
             if (res.status === 429) {
                 const wait = i * 2000;
@@ -108,57 +118,91 @@ async function postToFirebase(url, data, retries = 3) {
             }
             return res;
         } catch (err) {
+            console.error(`❌ Firebase attempt ${i} failed:`, err.message);
             if (i === retries) throw err;
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🌟 THE BEST BUTTON REPLACEMENT → sendPoll
-// Users tap an option = bot reads it like a button tap!
+// ✅ FIX: Safe Image Sender — NEVER crashes on 403/404
+// Tries image first → falls back to text only if image fails
+// ─────────────────────────────────────────────────────────────
+async function safeSendImage(sock, sender, imageUrl, caption) {
+    // If no URL provided, just send text directly
+    if (!imageUrl || imageUrl.trim() === "") {
+        await sock.sendMessage(sender, { text: caption });
+        return;
+    }
+
+    try {
+        // ✅ First check if URL is reachable (HEAD request, no download)
+        const check = await fetch(imageUrl, { method: 'HEAD' });
+        if (!check.ok) {
+            // URL returned 403/404 etc — skip image, send text only
+            console.warn(`⚠️ Image URL returned ${check.status}, sending text only`);
+            await sock.sendMessage(sender, { text: caption });
+            return;
+        }
+
+        // URL is valid — send with image
+        await sock.sendMessage(sender, {
+            image:   { url: imageUrl },
+            caption: caption
+        });
+
+    } catch (imgErr) {
+        // Any network error — skip image, send text only
+        console.warn("⚠️ Image send failed, using text fallback:", imgErr.message);
+        await sock.sendMessage(sender, { text: caption });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 🌟 Send Main Menu Poll
 // ─────────────────────────────────────────────────────────────
 async function sendMainMenu(sock, sender) {
-    // Step 1: Send welcome image + info text
-    await sock.sendMessage(sender, {
-        image: { url: "https://your-image-url.com/javagoat-logo.jpg" },
-        caption:
-            `👋 *Welcome to ${BUSINESS_NAME}!*\n\n` +
-            `${BUSINESS_TAGLINE}\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━\n` +
-            `🌐 ${BUSINESS_WEBSITE}\n` +
-            `📱 ${BUSINESS_PHONE}\n` +
-            `━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `👇 *Tap an option in the poll below!*`
-    });
+    const welcomeText =
+        `👋 *Welcome to ${BUSINESS_NAME}!*\n\n` +
+        `${BUSINESS_TAGLINE}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `🌐 ${BUSINESS_WEBSITE}\n` +
+        `📱 ${BUSINESS_PHONE}\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👇 *Tap an option in the poll below!*`;
 
-    // Step 2: Send Poll — works like clickable buttons! ✅
+    // ✅ Safe image send — will fallback to text if image fails
+    await safeSendImage(sock, sender, PROFILE_PHOTO_URL, welcomeText);
+
+    // ✅ Poll always sends regardless of image success/fail
     await sock.sendMessage(sender, {
         poll: {
-            name: `🍽️ What do you want to do?`,   // Poll question
-            values: [                                // Poll options (act as buttons)
+            name:            `🍽️ What do you want to do?`,
+            values:          [
                 "📋 View Menu",
                 "📖 About Us",
                 "📬 Contact Info",
                 "🚀 Our Projects",
                 "🛒 How to Order"
             ],
-            selectableCount: 1   // Single choice only (like a button)
+            selectableCount: 1
         }
     });
 }
 
 // ─────────────────────────────────────────────────────────────
-// 📋 Send Menu as Poll (user taps dish to order!)
+// 📋 Send Menu Poll
 // ─────────────────────────────────────────────────────────────
 async function sendMenuPoll(sock, sender) {
     const menu = await getMenuFromApp();
 
     if (menu.length === 0) {
-        await sock.sendMessage(sender, { text: "⏳ Menu is updating. Please check back soon!" });
+        await sock.sendMessage(sender, {
+            text: "⏳ Menu is updating. Please check back in a few minutes!"
+        });
         return;
     }
 
-    // Show full menu text first
     let menuText = `🍔 *JAVAGOAT LIVE MENU* 🍕\n━━━━━━━━━━━━━━━━━━━━\n\n`;
     menu.forEach((item, i) => {
         menuText += `${i + 1}. 🔸 *${item.name}* — ₹${item.price}\n`;
@@ -167,14 +211,13 @@ async function sendMenuPoll(sock, sender) {
 
     await sock.sendMessage(sender, { text: menuText });
 
-    // Send menu as a poll — tap = order that item!
-    // WhatsApp polls support max 12 options
+    // Max 12 options in WhatsApp poll
     const pollOptions = menu.slice(0, 12).map(item => `${item.name} — ₹${item.price}`);
 
     await sock.sendMessage(sender, {
         poll: {
-            name: "🛒 Which dish do you want to order?",
-            values: pollOptions,
+            name:            "🛒 Which dish do you want to order?",
+            values:          pollOptions,
             selectableCount: 1
         }
     });
@@ -205,7 +248,7 @@ async function startBot() {
         if (qr) {
             console.clear();
             console.log('\n==================================================');
-            console.log('⚠️ QR CODE TOO BIG? CLICK "View raw logs" top right!');
+            console.log('⚠️ QR TOO BIG? CLICK "View raw logs" top right!');
             console.log('==================================================\n');
             qrcode.generate(qr, { small: true });
         }
@@ -218,71 +261,70 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ── Message Handler ──────────────────────────────────────
+    // ────────────────────────────────────────────────────────
+    // 📨 Message Handler
+    // ────────────────────────────────────────────────────────
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-            if (msg.key.fromMe) return;
+            if (!msg?.message)                                    return;
+            if (msg.key.remoteJid === 'status@broadcast')         return;
+            if (msg.key.fromMe)                                   return;
 
             const sender = msg.key.remoteJid;
-            if (isRateLimited(sender)) return;
+            if (isRateLimited(sender))                            return;
 
-            // ✅ Read poll vote (user tapped a poll option)
+            // ── Read poll vote ──────────────────────────────
             const pollVote = msg.message?.pollUpdateMessage;
 
-            // ✅ Read normal text messages
+            // ── Read text ───────────────────────────────────
             const text = (
-                msg.message.conversation                                           ||
-                msg.message.extendedTextMessage?.text                             ||
+                msg.message.conversation              ||
+                msg.message.extendedTextMessage?.text ||
                 ""
             ).toLowerCase().trim();
 
-            console.log(`📩 From ${sender.split('@')[0]}: "${text || '[poll vote]'}"`);
+            console.log(`📩 From ${sender.split('@')[0]}: "${text || '[poll]'}"`);
 
-            // ══════════════════════════════════════════════
-            // 🗳️ HANDLE POLL VOTES (main menu + menu poll)
-            // ══════════════════════════════════════════════
+            // ════════════════════════════════════════════════
+            // 🗳️ POLL VOTE HANDLER
+            // ════════════════════════════════════════════════
             if (pollVote) {
-                // Get the selected option name from the vote
                 const selectedOption = pollVote.vote?.selectedOptions?.[0]?.optionName || "";
-                const voteLower      = selectedOption.toLowerCase();
-
+                const v              = selectedOption.toLowerCase();
                 console.log(`🗳️ Poll vote: "${selectedOption}"`);
 
-                // ── Main Menu Poll Options ─────────────────
-                if (voteLower.includes("view menu") || voteLower.includes("menu")) {
+                if (v.includes("view menu") || v.includes("menu")) {
                     await sendMenuPoll(sock, sender);
                     return;
                 }
-                if (voteLower.includes("about")) {
+                if (v.includes("about")) {
                     await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
-                    await sock.sendMessage(sender, { text: `💡 Say *hi* to return to the main menu!` });
+                    await sock.sendMessage(sender, { text: `💡 Say *hi* to return to main menu!` });
                     return;
                 }
-                if (voteLower.includes("contact")) {
+                if (v.includes("contact")) {
                     await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
                     return;
                 }
-                if (voteLower.includes("projects")) {
+                if (v.includes("projects")) {
                     await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
                     return;
                 }
-                if (voteLower.includes("how to order")) {
+                if (v.includes("how to order")) {
                     await sock.sendMessage(sender, {
                         text:
                             `🛒 *How to Order:*\n\n` +
-                            `1️⃣ Type *menu* to see all dishes\n` +
-                            `2️⃣ Tap a dish in the poll\n` +
-                            `3️⃣ Send your *Name + Address*\n` +
-                            `4️⃣ Order placed! 🎉\n\n` +
-                            `Or just type: *order pizza*, *order burger* etc.`
+                            `1️⃣ Type *menu* → tap a dish in the poll\n` +
+                            `2️⃣ Send your *Name + Address*\n` +
+                            `3️⃣ Order confirmed! 🎉\n\n` +
+                            `Or directly type: *order pizza*`
                     });
                     return;
                 }
 
-                // ── Menu Poll — User tapped a dish to order ─
-                const menu = await getMenuFromApp();
+                // ── Menu poll — user tapped a dish ──────────
+                const menu        = await getMenuFromApp();
                 const matchedItem = menu.find(item =>
                     selectedOption.toLowerCase().includes(item.name.toLowerCase())
                 );
@@ -295,29 +337,22 @@ async function startBot() {
                         `You selected: *${matchedItem.name}* (₹${matchedItem.price})\n` +
                         `🚚 *Delivery Fee:* ₹50\n` +
                         `💰 *Total:* ₹${parseFloat(matchedItem.price) + 50}\n\n` +
-                        `📍 Please reply with your:\n*Full Name, Phone & Delivery Address*`;
+                        `📍 Please reply with:\n*Full Name, Phone & Delivery Address*`;
 
-                    if (matchedItem.imageUrl) {
-                        await sock.sendMessage(sender, {
-                            image:   { url: matchedItem.imageUrl },
-                            caption: orderText
-                        });
-                    } else {
-                        await sock.sendMessage(sender, { text: orderText });
-                    }
+                    // ✅ Safe image send for dish image too
+                    await safeSendImage(sock, sender, matchedItem.imageUrl, orderText);
                     return;
                 }
 
-                // Unknown poll vote fallback
                 await sock.sendMessage(sender, {
-                    text: `🤔 Didn't catch that. Say *hi* to see the menu again!`
+                    text: `🤔 Couldn't process that. Say *hi* to see the main menu!`
                 });
                 return;
             }
 
-            // ══════════════════════════════════════════════
-            // 🛒 ORDER STEP 2: Waiting for Address
-            // ══════════════════════════════════════════════
+            // ════════════════════════════════════════════════
+            // 🛒 ORDER STEP 2 — Address received
+            // ════════════════════════════════════════════════
             if (orderStates[sender]?.step === 'WAITING_FOR_ADDRESS') {
                 const item             = orderStates[sender].item;
                 const customerWaNumber = sender.split('@')[0];
@@ -346,52 +381,46 @@ async function startBot() {
                 await sock.sendMessage(sender, {
                     text:
                         `✅ *Order Placed Successfully!*\n\n` +
-                        `Your order for *${item.name}* is being prepared! 👨‍🍳\n\n` +
+                        `Your *${item.name}* is being prepared! 👨‍🍳\n\n` +
                         `*Total:* ₹${javaGoatOrder.total} (Inc. ₹50 Delivery)\n` +
                         `*Payment:* Cash on Delivery\n` +
                         `*Status:* 🟡 Preparing\n\n` +
                         `Delivering to your address soon! 🚀\n\n` +
-                        `Say *hi* to order again! 😊`
+                        `Say *hi* to place another order 😊`
                 });
                 delete orderStates[sender];
                 return;
             }
 
-            // ══════════════════════════════════════════════
+            // ════════════════════════════════════════════════
             // 📝 TEXT KEYWORD HANDLERS
-            // ══════════════════════════════════════════════
+            // ════════════════════════════════════════════════
 
-            // 👋 Greeting → Show main poll menu
             if (["hi","hello","hey","start","hii","helo"].some(g => text.includes(g))) {
                 await sendMainMenu(sock, sender);
                 return;
             }
 
-            // 📋 Menu keyword
             if (text === "menu" || text.includes("food") || text.includes("price") || text.includes("list")) {
                 await sendMenuPoll(sock, sender);
                 return;
             }
 
-            // 📖 About
-            if (text === "about" || text === "about me" || text === "aboutme") {
+            if (["about","about me","aboutme"].includes(text)) {
                 await sock.sendMessage(sender, { text: BUSINESS_ABOUT });
                 return;
             }
 
-            // 📬 Contact
-            if (text === "contact" || text.includes("call") || text === "contactme") {
+            if (["contact","contactme","call us"].includes(text) || text.includes("call")) {
                 await sock.sendMessage(sender, { text: BUSINESS_CONTACT });
                 return;
             }
 
-            // 🚀 Projects
-            if (text === "projects" || text === "project" || text === "portfolio") {
+            if (["projects","project","portfolio"].includes(text)) {
                 await sock.sendMessage(sender, { text: BUSINESS_PROJECTS });
                 return;
             }
 
-            // 🛒 Direct order by text: "order pizza"
             if (text.startsWith("order ")) {
                 const productRequested = text.replace("order ", "").trim();
                 const menu             = await getMenuFromApp();
@@ -399,7 +428,7 @@ async function startBot() {
 
                 if (!matchedItem) {
                     await sock.sendMessage(sender, {
-                        text: `❌ *${productRequested}* not found in menu.\n\nType *menu* to see all dishes!`
+                        text: `❌ *${productRequested}* not found.\n\nType *menu* to see all dishes!`
                     });
                     return;
                 }
@@ -411,36 +440,35 @@ async function startBot() {
                     `You selected: *${matchedItem.name}* (₹${matchedItem.price})\n` +
                     `🚚 *Delivery Fee:* ₹50\n` +
                     `💰 *Total:* ₹${parseFloat(matchedItem.price) + 50}\n\n` +
-                    `📍 Please reply with your:\n*Full Name, Phone & Delivery Address*`;
+                    `📍 Please reply with:\n*Full Name, Phone & Delivery Address*`;
 
-                if (matchedItem.imageUrl) {
-                    await sock.sendMessage(sender, { image: { url: matchedItem.imageUrl }, caption: captionText });
-                } else {
-                    await sock.sendMessage(sender, { text: captionText });
-                }
+                await safeSendImage(sock, sender, matchedItem.imageUrl, captionText);
                 return;
             }
 
-            // 🛒 "order" alone
             if (text === "order") {
                 await sock.sendMessage(sender, {
-                    text: `🛒 *How to Order:*\n\nType: *order [dish name]*\n\nExample: *order pizza*\n\nOr type *menu* to see all dishes first! 📋`
+                    text:
+                        `🛒 *How to Order:*\n\n` +
+                        `Type: *order [dish name]*\n\n` +
+                        `Example: *order pizza*\n\n` +
+                        `Or type *menu* to browse first! 📋`
                 });
                 return;
             }
 
-            // 🤔 Default fallback
+            // 🤔 Fallback
             await sock.sendMessage(sender, {
                 text:
                     `🤔 I didn't understand that.\n\n` +
                     `Here's what I can do:\n\n` +
-                    `👋 *hi*              → Main Menu (Poll)\n` +
-                    `📋 *menu*            → Food Menu (Poll)\n` +
-                    `📖 *about*           → About JavaGoat\n` +
+                    `👋 *hi*              → Main Menu\n` +
+                    `📋 *menu*            → Food Menu\n` +
+                    `📖 *about*           → About Us\n` +
                     `📬 *contact*         → Contact Info\n` +
                     `🚀 *projects*        → Our Projects\n` +
-                    `🛒 *order [food]*    → Place an Order\n\n` +
-                    `_Say *hi* to see the full menu!_ 😊`
+                    `🛒 *order [food]*    → Place Order\n\n` +
+                    `_Say *hi* to get started!_ 😊`
             });
 
         } catch (err) {
